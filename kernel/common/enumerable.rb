@@ -544,6 +544,35 @@ module Enumerable
     nil
   end
 
+  #
+  # call-seq:
+  #    enum.each_entry {|obj| block}  => enum
+  #
+  # Calls <i>block</i> once for each element in <i>self</i>, passing that
+  # element as a parameter, converting multiple values from yield to an
+  # array.
+  #
+  #    class Foo
+  #      include Enumerable
+  #      def each
+  #        yield 1
+  #        yield 1,2
+  #      end
+  #    end
+  #    Foo.new.each_entry{|o| print o, " -- "}
+  #
+  # produces:
+  #
+  #    1 -- [1, 2] --
+  #
+  def each_entry(*pass)
+    return to_enum :each_entry, *pass unless block_given?
+    each(*pass) do |*args|
+      yield args.size == 1 ? args[0] : args
+    end
+    self
+  end
+
   def each_slice(slice_size)
     n = Type.coerce_to(slice_size, Fixnum, :to_int)
     raise ArgumentError, "invalid slice size: #{n}" if n <= 0
