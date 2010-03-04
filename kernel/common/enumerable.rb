@@ -1018,6 +1018,154 @@ module Enumerable
     self
   end
 
+  #
+  #  call-seq:
+  #     enum.slice_before(pattern) => enumerator
+  #     enum.slice_before {|elt| bool } => enumerator
+  #     enum.slice_before(initial_state) {|elt, state| bool } => enumerator
+  #
+  #  Creates an enumerator for each chunked elements.
+  #  The beginnings of chunks are defined by _pattern_ and the block.
+  #  If _pattern_ === _elt_ returns true or 
+  #  the block returns true for the element,
+  #  the element is beginning of a chunk.
+  #
+  #  The result enumerator yields the chunked elements as an array.
+  #  So "each" method can be called as follows.
+  #
+  #    enum.slice_before(pattern).each {|ary| ... }
+  #    enum.slice_before {|elt| bool }.each {|ary| ... }
+  #    enum.slice_before(initial_state) {|elt, state| bool }.each {|ary| ... }
+  #
+  #  For example, iteration over ChangeLog entries can be implemented as
+  #  follows.
+  #
+  #    # iterate over ChangeLog entries.
+  #    open("ChangeLog") {|f|
+  #      f.slice_before(/\A\S/).each {|e| pp e}
+  #    }
+  #
+  #    # same as above.  block is used instead of pattern argument.
+  #    open("ChangeLog") {|f|
+  #      f.slice_before {|line| /\A\S/ === line }.each {|e| pp e}
+  #    }
+  #
+  # "svn proplist -R" produces multiline output for each file.
+  # They can be chunked as follows: 
+  #
+  #    IO.popen([{"LC_ALL"=>"C"}, "svn", "proplist", "-R"]) {|f|
+  #      f.lines.slice_before(/\AProp/).each {|lines| p lines }
+  #    }
+  #    #=> ["Properties on '.':\n", "  svn:ignore\n", "  svk:merge\n"]
+  #    #   ["Properties on 'goruby.c':\n", "  svn:eol-style\n"]
+  #    #   ["Properties on 'complex.c':\n", "  svn:mime-type\n", "  svn:eol-style\n"]
+  #    #   ["Properties on 'regparse.c':\n", "  svn:eol-style\n"]
+  #    #   ...
+  #
+  #  If the block needs to maintain state over multiple elements,
+  #  local variables can be used.
+  #  For example, monotonically increasing elements can be chunked as follows.
+  #
+  #    a = [3,1,4,1,5,9,2,6,5,3,5]
+  #    n = 0
+  #    p a.slice_before {|elt|
+  #      prev, n = n, elt
+  #      prev > elt
+  #    }.to_a
+  #    #=> [[3], [1, 4], [1, 5, 9], [2, 6], [5], [3, 5]]
+  #
+  #  However local variables are not appropriate to maintain state
+  #  if the result enumerator is used twice or more.
+  #  In such case, the last state of the 1st +each+ is used in 2nd +each+.
+  #  _initial_state_ argument can be used to avoid this problem.
+  #  If non-nil value is given as _initial_state_,
+  #  it is duplicated for each "each" method invocation of the enumerator.
+  #  The duplicated object is passed to 2nd argument of the block for
+  #  +slice_before+ method.
+  #
+  #    # word wrapping.
+  #    # this assumes all characters have same width.
+  #    def wordwrap(words, maxwidth)
+  #      # if cols is a local variable, 2nd "each" may start with non-zero cols.
+  #      words.slice_before(cols: 0) {|w, h|
+  #        h[:cols] += 1 if h[:cols] != 0
+  #        h[:cols] += w.length
+  #        if maxwidth < h[:cols]
+  #          h[:cols] = w.length
+  #          true
+  #        else
+  #          false
+  #        end
+  #      }
+  #    end
+  #    text = (1..20).to_a.join(" ")
+  #    enum = wordwrap(text.split(/\s+/), 10)
+  #    puts "-"*10
+  #    enum.each {|ws| puts ws.join(" ") }
+  #    puts "-"*10
+  #    #=> ----------
+  #    #   1 2 3 4 5
+  #    #   6 7 8 9 10
+  #    #   11 12 13
+  #    #   14 15 16
+  #    #   17 18 19
+  #    #   20
+  #    #   ----------
+  #
+  # mbox contains series of mails which start with Unix From line.
+  # So each mail can be extracted by slice before Unix From line.
+  #
+  #    # parse mbox
+  #    open("mbox") {|f|
+  #      f.slice_before {|line|
+  #        line.start_with? "From "
+  #      }.each {|mail|
+  #        unix_from = mail.shift
+  #        i = mail.index("\n")
+  #        header = mail[0...i]
+  #        body = mail[(i+1)..-1]
+  #        fields = header.slice_before {|line| !" \t".include?(line[0]) }.to_a
+  #        p unix_from
+  #        pp fields
+  #        pp body
+  #      }
+  #    }
+  #
+  #    # split mails in mbox (slice before Unix From line after an empty line)
+  #    open("mbox") {|f|
+  #      f.slice_before(emp: true) {|line,h|
+  #      prevemp = h[:emp]
+  #      h[:emp] = line == "\n"
+  #      prevemp && line.start_with?("From ")
+  #    }.each {|mail|
+  #      pp mail
+  #    }
+  #
+  #
+  def slice_before(arg = undefined, &block)
+    if block_given?
+      has_init = not(arg.equal? undefined)
+    else
+      raise ArgumentError, "wrong number of arguments (0 for 1)" if arg.equal? undefined
+      block = Proc.new{|elem| arg === elem }
+    end
+    Enumerator.new do |yielder|
+      init = arg.dup if has_init
+      accumulator = nil
+      each do |elem|
+        start_new = has_init ? block.yield(elem, init) : block.yield(elem)
+        if start_new
+          yielder.yield accumulator if accumulator
+          accumulator = [elem]
+        else
+          accumulator ||= []
+          accumulator << elem
+        end
+      end
+      yielder.yield accumulator if accumulator
+    end
+  end
+
   ##
   # :call-seq:
   #   enum.take(n)                => array
